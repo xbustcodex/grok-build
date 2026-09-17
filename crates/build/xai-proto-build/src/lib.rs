@@ -153,6 +153,23 @@ impl XaiProtoBuilder {
         // Can only process one input file when using --dependency_out=FILE.
         for proto in protos {
             let mut command = Command::new(protoc.unwrap_or(Path::new("protoc")));
+            #[cfg(windows)]
+            let dependency_file = tempfile::NamedTempFile::new()
+                .context("failed to create temporary protoc dependency file")?;
+            #[cfg(windows)]
+            let descriptor_file = tempfile::NamedTempFile::new()
+                .context("failed to create temporary protoc descriptor file")?;
+            #[cfg(windows)]
+            command
+                .arg(format!(
+                    "--dependency_out={}",
+                    dependency_file.path().display()
+                ))
+                .arg(format!(
+                    "--descriptor_set_out={}",
+                    descriptor_file.path().display()
+                ));
+            #[cfg(not(windows))]
             command
                 .arg("--dependency_out=/dev/stdout")
                 .arg("--descriptor_set_out=/dev/null");
@@ -181,14 +198,23 @@ impl XaiProtoBuilder {
                 return Err(anyhow::anyhow!("protoc command failed"));
             }
 
+            #[cfg(windows)]
+            let output = fs::read_to_string(dependency_file.path())
+                .context("failed to read protoc dependency output")?;
+            #[cfg(not(windows))]
             let output =
                 String::from_utf8(output.stdout).context("protoc command output not UTF-8")?;
 
             let mut lines = output.lines();
             let first_line = lines.next().context("protoc command output is empty")?;
+            #[cfg(windows)]
+            let prefix_owned = format!("{}:", descriptor_file.path().display());
+            #[cfg(windows)]
+            let prefix = prefix_owned.as_str();
+            #[cfg(not(windows))]
             let prefix = "/dev/null:";
             let rem = first_line.strip_prefix(prefix).with_context(|| {
-                format!("protoc command output must start with /dev/null: {output:?}")
+                format!("protoc command output must start with {prefix} {output:?}")
             })?;
             for line in iter::once(rem).chain(lines) {
                 let line = line.trim();
